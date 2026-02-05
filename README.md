@@ -31,9 +31,6 @@ bash ./scripts/long_term_forecast/Solar_script/LagAttention.sh
 bash ./scripts/long_term_forecast/Weather_script/LagAttention.sh
 bash ./scripts/long_term_forecast/Exchange_script/LagAttention.sh
 
-# Short-term Forecasting
-bash ./scripts/short_term_forecast/Illness_script/LagAttention.sh
-bash ./scripts/short_term_forecast/PEMS/LagAttention.sh
 ```
 
 
@@ -49,7 +46,6 @@ This module is responsible for loading and preprocessing the data used in both l
 **File:** `./exp`
 This module contains two main functionalities for experimenting with forecasting:
 - `./exp/exp_long_term_forecasting.py`: For long term forecasting.
-- `./exp/exp_short_term_forecasting.py`: For short term forecasting.
 
 ### 3. Layers
 **File:** `./layers`
