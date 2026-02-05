@@ -127,14 +127,14 @@ class MultiScaleTrendMixing(nn.Module):
 class MLPDim(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(MLPDim, self).__init__()
-        # 定义一个简单的两层MLP
+
         self.fc1 = nn.Linear(input_dim, 2 * input_dim)
 
         self.fc2 = nn.Linear(2 * input_dim, output_dim)
 
     def forward(self, x):
-        # 通过两层MLP进行降维
-        x = torch.relu(self.fc1(x))  # 使用ReLU激活函数
+
+        x = torch.relu(self.fc1(x))  
         x = self.fc2(x)
         return x
     
@@ -213,7 +213,7 @@ class PastDecomposableMixing(nn.Module):
             self.multigapattention1 = torch.nn.ModuleList(
                 [
                     # GapAttention(configs.t_model,256,32*(2**(configs.down_sampling_layers-i)))
-                    GapAttention(configs.t_model,384,64,configs.var_num)#适应24，8，更改了3的倍数的长度嵌入长度：768
+                    GapAttention(configs.t_model,384,64,configs.var_num)
                     for i in range(configs.down_sampling_layers + 1)
                 ]
             )
@@ -225,21 +225,6 @@ class PastDecomposableMixing(nn.Module):
                 ]
             )
 
-        # if configs.channel_independence==1:
-        #     self.patchattention = torch.nn.ModuleList(
-        #         [
-        #             PatchAttention(configs.seq_len,24)
-        #             for i in range(configs.down_sampling_layers + 1)
-        #         ]
-        #     )
-        # else:
-        #     self.patchattention = torch.nn.ModuleList(
-        #         [
-        #             PatchAttention(configs.t_model,128)
-        #             for i in range(configs.down_sampling_layers + 1)
-        #         ]
-        #     )
-    
 
     def forward(self, x_list, start_p, selected_idx):
         length_list = []
@@ -252,12 +237,15 @@ class PastDecomposableMixing(nn.Module):
         out_trend_list = []
         index=0
         for x in x_list:
-            #print(f'xshape{x.shape}')
+            print(f'xshape{x.shape}')
             season, trend = self.decompsition(x)
             #print(trend.shape)
             # trend=self.Season_FC[index](trend)
             # season=self.multigapattention2[index](season)
             season=self.Season_FC[index](season)
+
+
+            
             trend=self.multigapattention2[index](trend, start_p, selected_idx)
             # patch_trend=self.patchattention[index](trend)
             # trend=sub_trend+patch_trend
@@ -274,9 +262,8 @@ class PastDecomposableMixing(nn.Module):
             device = torch.device("cuda:1")
 
             out_trend=out_trend.permute(0,2,1).to(device)
-            # 调用模型
 
-            out_trend_flat = out_trend.reshape(-1, out_trend.size(-1))  # 使用 reshape 代替 view
+            out_trend_flat = out_trend.reshape(-1, out_trend.size(-1)) 
 
             model = MLPDim(input_dim=out_trend.size(2), output_dim=out_season.size(1)).to(device)
 
@@ -466,17 +453,14 @@ class Model(nn.Module):
         
         # embedding
         enc_out_list = []
-        #x_list = self.pre_enc(x_list)#单通道不处理；多通道会得到season和trend两个列表
         if x_mark_enc is not None:
             for i, x, x_mark in zip(range(len(x_list)), x_list, x_mark_list):
-                #print(x.shape)
-                #print(x_mark.shape)
+
                 if self.channel_independence == 1:
                     enc_out = self.enc_embedding(x, x_mark)#[B,T,C]
                 else:
                     enc_out = self.enc_embedding(x, x_mark).permute(0,2,1)#[B,T,C]
-                #print(f'enc_out{enc_out.shape}')               
-                #print(enc_out.shape)
+
                 enc_out_list.append(enc_out)
         else:
             for i, x in zip(range(len(x_list)), x_list):
@@ -536,10 +520,9 @@ class Model(nn.Module):
         start_pk=[float('inf')]*self.var_num
         variable_data=x_enc.permute(2,0,1)
 
-        #需要的输入：torch.Size([7, 256, 96, 16])
         clustered_variables = self.select_fix_variable(variable_data)
         
-        x_days=[] #patch  torch.Size([1792, 16, 24])  orch.Size([7, 256, 16, 24])
+        x_days=[] 
           
         x_day=variable_data[:,:,0:self.daytime]
 
@@ -570,7 +553,6 @@ class Model(nn.Module):
 
                         fixed_variable_mean = fixed_variable.mean(dim=0, keepdim=True)
 
-                        # 计算余弦相似度
                         cos_sim = abs(F.cosine_similarity(sampled_variable_mean, fixed_variable_mean))
 
                         # Update best correlation and time shift
@@ -640,7 +622,6 @@ class Model(nn.Module):
 
                             fixed_variable_mean = fixed_variable.mean(dim=0, keepdim=True)
 
-                            # 计算余弦相似度
                             cos_sim = abs(F.cosine_similarity(sampled_variable_mean, fixed_variable_mean))
 
                             # Update best correlation and time shift
@@ -659,59 +640,76 @@ class Model(nn.Module):
         return start_p, selected_idx
 
 
-    def select_fix_variable(self, data):
 
-        data_final = data.mean(dim=1)  
-        
+
+    def select_fix_variable(self, data, threshold=0.6, sim_metric="cosine"):
+        """
+        Args:
+            data: tensor, expected shape [V, T, ...]; original code used data.mean(dim=1)
+            threshold: similarity threshold to group variables (higher -> stricter)
+            sim_metric: 'cosine' or 'pearson'
+        Returns:
+            clustered_variables: {cluster_id: [var_indices]} with medoid first
+        """
+        # Aggregate like your original: mean over dim=1
+        data_final = data.mean(dim=1)  # [V, T]
         print(data_final.shape)
-        max_cluster=data.size(0)
-        data_reshaped = data_final.cpu().detach().numpy()
 
-        pca = PCA(n_components=1)  
-        pca.fit(data_reshaped)
-        data_pca = pca.transform(data_reshaped)
-        
+        # Move to CPU numpy
+        X = data_final.detach().cpu().numpy()  # [V, T]
+        V = X.shape[0]
 
-        range_n_clusters = range(2, 6) 
+        # Compute similarity matrix
+        if sim_metric == "cosine":
+            S = cosine_similarity_matrix(X)  # [V, V]
+        elif sim_metric == "pearson":
+            S = pearson_corr_matrix(X)
+        else:
+            raise ValueError("sim_metric must be 'cosine' or 'pearson'")
 
-        best_score = -1  
-        best_k = 0 
-        best_labels =[]
+        # Ensure diagonal is 1
+        np.fill_diagonal(S, 1.0)
 
-        for n_clusters in range_n_clusters:
-            # KMeans聚类
-            kmeans = KMeans(n_clusters=n_clusters)
-            kmeans.fit(data_pca)
+        # Greedy complete-link clustering:
+        # start with all variables unassigned; build clusters ensuring all pairs >= threshold
+        unassigned = set(range(V))
+        clusters = []
 
-            labels = kmeans.labels_
-    
-            # 计算轮廓系数
-            score = silhouette_score(data_pca, labels)
+        while unassigned:
+            # Start a new cluster with an arbitrary seed
+            seed = unassigned.pop()
+            cluster = [seed]
 
-            if score > best_score:
-                best_score = score
-                best_k = n_clusters
-                best_labels = labels
+            # Try to add variables that are similar to ALL current members
+            added = True
+            while added:
+                added = False
+                candidates = list(unassigned)
+                for j in candidates:
+                    # Check similarity to all current cluster members
+                    if np.all(S[j, cluster] >= threshold):
+                        cluster.append(j)
+                        unassigned.remove(j)
+                        added = True
 
-        clustered_variables = {} 
+            clusters.append(cluster)
 
-        for var_index, label in enumerate(best_labels):
-            if label not in clustered_variables:
-                clustered_variables[label] = []
-            clustered_variables[label].append(var_index)
+        # Build mapping and put medoid first (the one with max average similarity within its cluster)
+        clustered_variables = {}
+        for cid, vars_idx in enumerate(clusters):
+            if len(vars_idx) == 1:
+                medoid = vars_idx[0]
+            else:
+                subS = S[np.ix_(vars_idx, vars_idx)]
+                avg_sim = subS.mean(axis=1)
+                medoid = vars_idx[int(np.argmax(avg_sim))]
+            # reorder: medoid first
+            ordered = [medoid] + [v for v in vars_idx if v != medoid]
+            clustered_variables[cid] = ordered
 
-        for cluster_id, variables in clustered_variables.items():
-            cluster_center = kmeans.cluster_centers_[cluster_id]
-        
-            distances = np.linalg.norm(data_pca[variables] - cluster_center, axis=1)
-            center_variable_index = variables[np.argmin(distances)]  
+        print(clustered_variables)
 
-            variables.remove(center_variable_index)
-            variables.insert(0, center_variable_index)
-
-        
         return clustered_variables
-    
 
     
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
@@ -766,12 +764,11 @@ class Normalize(nn.Module):
         self.affine_bias = nn.Parameter(torch.zeros(self.num_features))
 
     def _get_statistics(self, x):
-        #ndim为张量的维数，此处x.ndim=3
         dim2reduce = tuple(range(1, x.ndim - 1))
         if self.subtract_last:
             self.last = x[:, -1, :].unsqueeze(1)
         else:
-            self.mean = torch.mean(x, dim=dim2reduce, keepdim=True).detach()#dim2reduce其实就是1，也就是在时间上归一化
+            self.mean = torch.mean(x, dim=dim2reduce, keepdim=True).detach()
         self.stdev = torch.sqrt(torch.var(x, dim=dim2reduce, keepdim=True, unbiased=False) + self.eps).detach()
 
     def _normalize(self, x):
@@ -799,3 +796,24 @@ class Normalize(nn.Module):
         else:
             x = x + self.mean
         return x
+
+
+
+
+
+
+
+def cosine_similarity_matrix(X):
+    # X: [V, T]
+    X = X.astype(np.float64)
+    norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-12
+    Xn = X / norms
+    return Xn @ Xn.T  # [V, V], in [-1, 1]
+
+def pearson_corr_matrix(X):
+    # Optional alternative similarity: Pearson correlation
+    X = X.astype(np.float64)
+    Xc = X - X.mean(axis=1, keepdims=True)
+    denom = np.linalg.norm(Xc, axis=1, keepdims=True) + 1e-12
+    Xn = Xc / denom
+    return Xn @ Xn.T  # [-1, 1]
